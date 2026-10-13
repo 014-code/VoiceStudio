@@ -82,7 +82,7 @@ jobs:
         shell: bash
     env:
       VOICESTUDIO_RUST_TARGET: ${{ matrix.target }}
-      VOICESTUDIO_UPDATE_CHANNEL: electron-stable-win32-${{ matrix.arch }}
+      VOICESTUDIO_UPDATE_CHANNEL: electron-microsoft-store-stable-win32-${{ matrix.arch }}
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
       VITE_POSTHOG_KEY: ${{ secrets.POSTHOG_PROJECT_TOKEN }}
       VITE_POSTHOG_HOST: ${{ vars.POSTHOG_HOST }}
@@ -217,6 +217,8 @@ jobs:
           if-no-files-found: error
           path: |
             electron/release/VoiceStudio-MicrosoftStore-*-win-${{ matrix.arch }}.exe
+            electron/release/VoiceStudio-MicrosoftStore-*-win-${{ matrix.arch }}.exe.blockmap
+            electron/release/electron-microsoft-store-stable-win32-${{ matrix.arch }}.yml
             electron/release/store-artifact-manifest-win32-${{ matrix.arch }}.json
             electron/release/authenticode-win32-${{ matrix.arch }}.json
 
@@ -299,7 +301,7 @@ jobs:
         run: |
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
           mkdir -p staged-verification
-          for package in microsoft-store-handoff/VoiceStudio-MicrosoftStore-*.exe; do
+          for package in microsoft-store-handoff/VoiceStudio-MicrosoftStore-*.exe microsoft-store-handoff/VoiceStudio-MicrosoftStore-*.exe.blockmap microsoft-store-handoff/electron-microsoft-store-stable-*.yml; do
             NAME=$(basename "$package")
             if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "$NAME"; then
               echo "Refusing to replace immutable Store package: $NAME"; exit 1
