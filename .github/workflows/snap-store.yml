@@ -72,6 +72,7 @@ jobs:
           bun x electron-builder --config electron-builder.config.mjs --linux snap --x64 --publish never
           node tests/packaging-contract.mjs --artifact
           node ../scripts/create_store_artifact_manifest.mjs --distribution=snap-store --platform=linux --arch=x64
+          node ../scripts/create_snap_store_assets.mjs
           node --input-type=module <<'NODE'
           import { readdirSync, readFileSync } from 'node:fs';
           const files = readdirSync('release');
@@ -98,3 +99,4 @@ jobs:
           path: |
             electron/release/*.snap
             electron/release/store-artifact-manifest-linux-x64.json
+            electron/release/snap-store-assets/
