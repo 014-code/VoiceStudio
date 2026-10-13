@@ -42,7 +42,7 @@ jobs:
       - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libxdo-dev libxtst-dev libx11-dev libxkbcommon-dev libwayland-dev libssl-dev pkg-config
+          sudo apt-get install -y libasound2-dev libxdo-dev libxtst-dev libx11-dev libxkbcommon-dev libwayland-dev libssl-dev pkg-config squashfs-tools
       - name: Bundle pinned uv
         run: |
           node --input-type=module <<'NODE'
@@ -71,6 +71,7 @@ jobs:
         run: |
           bun x electron-builder --config electron-builder.config.mjs --linux snap --x64 --publish never
           node tests/packaging-contract.mjs --artifact
+          node ../scripts/verify_snap_artifact.mjs
           node ../scripts/create_store_artifact_manifest.mjs --distribution=snap-store --platform=linux --arch=x64
           node ../scripts/create_snap_store_assets.mjs
           node --input-type=module <<'NODE'
@@ -98,5 +99,6 @@ jobs:
           if-no-files-found: error
           path: |
             electron/release/*.snap
+            electron/release/VoiceStudio-Electron-*-snap-verification.json
             electron/release/store-artifact-manifest-linux-x64.json
             electron/release/snap-store-assets/
