@@ -134,11 +134,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: snap-store
-    # Serialize uploads; the newest-tag check below keeps a slow older build
-    # from moving candidate backwards.
-    concurrency:
-      group: snap-store-upload
-      cancel-in-progress: false
+    # No shared concurrency group: GitHub keeps one pending run per group and
+    # cancels the rest, which could drop the newest tag. The newest-tag check
+    # below keeps a slow older build from moving candidate backwards.
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -148,6 +146,7 @@ jobs:
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
         run: |
+          set -o pipefail
           if [ -z "$SNAPCRAFT_STORE_CREDENTIALS" ]; then
             echo "::error::Add SNAPCRAFT_STORE_CREDENTIALS to the snap-store environment (docs/store-publishing/snap-store.md)"
             exit 1
@@ -159,6 +158,10 @@ jobs:
           fi
           newest=$(git ls-remote --tags --refs "https://github.com/$GITHUB_REPOSITORY" 'v*' \
             | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          if [ -z "$newest" ]; then
+            echo "::error::Could not list release tags to order candidate uploads"
+            exit 1
+          fi
           release=(--release=candidate)
           channel=candidate
           if [ "$GITHUB_REF_NAME" != "$newest" ]; then
@@ -167,7 +170,6 @@ jobs:
             channel="none (older than $newest)"
           fi
           sudo snap install snapcraft --classic
-          set -o pipefail
           snapcraft upload "${release[@]}" "$snap" | tee upload.log
           {
             echo "### Snap Store upload"
