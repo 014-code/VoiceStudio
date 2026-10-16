@@ -156,27 +156,37 @@ jobs:
             echo "::error::Expected one Snap artifact, found: $snap"
             exit 1
           fi
-          newest=$(git ls-remote --tags --refs "https://github.com/$GITHUB_REPOSITORY" 'v*' \
-            | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          newest_tag() {
+            git ls-remote --tags --refs "https://github.com/$GITHUB_REPOSITORY" 'v*' \
+              | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1
+          }
+          sudo snap install snapcraft --classic
+          # Upload first, then decide: the newest-tag check runs seconds before
+          # the release, so an older tag cannot move candidate backwards.
+          snapcraft upload "$snap" | tee upload.log
+          revision=$(grep -oE 'Revision [0-9]+' upload.log | tail -1 | grep -oE '[0-9]+')
+          if [ -z "$revision" ]; then
+            echo "::error::Could not read the Store revision from snapcraft upload"
+            exit 1
+          fi
+          newest=$(newest_tag)
           if [ -z "$newest" ]; then
             echo "::error::Could not list release tags to order candidate uploads"
             exit 1
           fi
-          release=(--release=candidate)
-          channel=candidate
-          if [ "$GITHUB_REF_NAME" != "$newest" ]; then
-            echo "::warning::$GITHUB_REF_NAME is older than $newest; uploading without releasing to candidate"
-            release=()
+          if [ "$GITHUB_REF_NAME" = "$newest" ]; then
+            snapcraft release "$SNAP_NAME" "$revision" candidate
+            channel=candidate
+          else
+            echo "::warning::$GITHUB_REF_NAME is older than $newest; revision $revision was not released"
             channel="none (older than $newest)"
           fi
-          sudo snap install snapcraft --classic
-          snapcraft upload "${release[@]}" "$snap" | tee upload.log
           {
             echo "### Snap Store upload"
             echo
             echo "- Source: \`$GITHUB_REF_NAME\` (\`$GITHUB_SHA\`)"
             echo "- Package: \`$(basename "$snap")\`"
-            echo "- Store result: $(grep -Ei 'revision' upload.log | tail -1)"
+            echo "- Store revision: $revision"
             echo "- Channel: $channel; promote with \`promote_revision\` after the runbook checks"
           } >> "$GITHUB_STEP_SUMMARY"
 
