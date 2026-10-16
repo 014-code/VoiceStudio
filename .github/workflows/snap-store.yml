@@ -134,6 +134,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: snap-store
+    # Serialize uploads; the newest-tag check below keeps a slow older build
+    # from moving candidate backwards.
+    concurrency:
+      group: snap-store-upload
+      cancel-in-progress: false
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -152,16 +157,25 @@ jobs:
             echo "::error::Expected one Snap artifact, found: $snap"
             exit 1
           fi
+          newest=$(git ls-remote --tags --refs "https://github.com/$GITHUB_REPOSITORY" 'v*' \
+            | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          release=(--release=candidate)
+          channel=candidate
+          if [ "$GITHUB_REF_NAME" != "$newest" ]; then
+            echo "::warning::$GITHUB_REF_NAME is older than $newest; uploading without releasing to candidate"
+            release=()
+            channel="none (older than $newest)"
+          fi
           sudo snap install snapcraft --classic
           set -o pipefail
-          snapcraft upload --release=candidate "$snap" | tee upload.log
+          snapcraft upload "${release[@]}" "$snap" | tee upload.log
           {
             echo "### Snap Store upload"
             echo
             echo "- Source: \`$GITHUB_REF_NAME\` (\`$GITHUB_SHA\`)"
             echo "- Package: \`$(basename "$snap")\`"
             echo "- Store result: $(grep -Ei 'revision' upload.log | tail -1)"
-            echo "- Channel: \`candidate\`; promote with \`promote_revision\` after the runbook checks"
+            echo "- Channel: $channel; promote with \`promote_revision\` after the runbook checks"
           } >> "$GITHUB_STEP_SUMMARY"
 
   promote:
@@ -170,6 +184,12 @@ jobs:
     timeout-minutes: 15
     environment: snap-store
     steps:
+      - name: Require the repository owner
+        run: |
+          if [ "$GITHUB_TRIGGERING_ACTOR" != "$GITHUB_REPOSITORY_OWNER" ]; then
+            echo "::error::Only $GITHUB_REPOSITORY_OWNER can promote a Snap to stable"
+            exit 1
+          fi
       - name: Release the revision to stable
         env:
           REVISION: ${{ inputs.promote_revision }}
