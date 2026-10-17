@@ -140,6 +140,11 @@ jobs:
         # Docker build (deploy/Dockerfile), which is what reddened main on #485.
         run: bun install --frozen-lockfile
 
+      # Mobile theme tokens are generated from the Electron theme and need its
+      # deps installed, so the pytest copy of this check skips before this point.
+      - name: Mobile theme tokens match Electron
+        run: bun --no-install scripts/export-mobile-tokens.ts --check
+
       # node:test suites for shared renderer modules (tests/frontend/*.test.mjs).
       # Node 22 strips TypeScript types natively; imports need explicit `.ts`.
       - name: Frontend unit tests
