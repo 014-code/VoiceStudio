@@ -90,6 +90,11 @@ jobs:
           devs = json.load(sys.stdin)["devices"]
           print(next(d["udid"] for rt, ds in devs.items() if "iOS" in rt for d in ds if d["name"].startswith("iPhone")))')
           echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+          # Boot and wait before testing: a runner that starts XCTest against a
+          # still-booting simulator fails with "test runner failed to initialize
+          # for UI testing" (kAXErrorCannotComplete).
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
           xcodebuild -project mobile/ios/VoiceStudio/VoiceStudio.xcodeproj \
             -scheme VoiceStudio -destination "id=$UDID" \
             CODE_SIGNING_ALLOWED=NO build-for-testing
