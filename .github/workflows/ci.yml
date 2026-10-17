@@ -268,10 +268,13 @@ jobs:
 
       - name: Desktop UI tests
         run: |
+          # The output is kept in the failure artifact: a crashed run's log is otherwise
+          # unavailable until the whole workflow finishes.
+          mkdir -p electron/test-results
           if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a bun run --cwd electron test:desktop-ui
+            xvfb-run -a bun run --cwd electron test:desktop-ui 2>&1 | tee electron/test-results/desktop-ui.log
           else
-            bun run --cwd electron test:desktop-ui
+            bun run --cwd electron test:desktop-ui 2>&1 | tee electron/test-results/desktop-ui.log
           fi
 
       - name: Upload failure artifacts
