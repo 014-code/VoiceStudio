@@ -180,10 +180,10 @@ jobs:
             cat /tmp/voicestudio-electron-smoke.log
             exit 1
           }
-          node electron/tests/playback-smoke.mjs
-          node electron/tests/dub-smoke.mjs
-          node electron/tests/longform-layout-smoke.mjs
-          node electron/tests/language-picker-smoke.mjs
+          # Every smoke must be classified (run here, or needs a backend/native app).
+          node --test electron/tests/smoke-inventory.test.mjs
+          # Runs every offline renderer smoke; it serves /api from a fake backend on $OMNIVOICE_PORT.
+          node electron/tests/run-renderer-smokes.mjs
 
   linux-native-package:
     name: Linux native package
