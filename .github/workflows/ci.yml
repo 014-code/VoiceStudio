@@ -209,6 +209,75 @@ jobs:
           cargo build --locked --release --manifest-path native/desktop-bridge/Cargo.toml
           node electron/tests/native-linux-package.mjs
 
+  # ── Desktop UI (real Electron app on every OS) ───────────────────────────
+  # Launches the unpackaged app with Playwright against a fake backend and runs
+  # one shared suite, so preload/IPC/main-process/user-data regressions on
+  # macOS and Windows surface on the PR instead of at release time. Packaged
+  # installers are covered separately by packaged-smoke.mjs on release paths.
+  electron-ui:
+    name: Desktop UI (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, label: macOS }
+          - { os: windows-2022, label: Windows }
+          - { os: ubuntu-24.04, label: Linux }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.4.2'
+
+      - name: Cache bun deps
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install Electron deps
+        run: bun install --frozen-lockfile
+
+      - name: Build Electron app
+        run: bun run --cwd electron build
+
+      # Ubuntu 24.04 restricts unprivileged user namespaces, which stops
+      # Electron's sandbox from starting. Relax it on the runner; the app
+      # itself is never launched with --no-sandbox.
+      - name: Allow Electron sandbox (Linux)
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Desktop UI tests
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a bun run --cwd electron test:desktop-ui
+          else
+            bun run --cwd electron test:desktop-ui
+          fi
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-ui-${{ matrix.label }}
+          path: electron/test-results/
+          if-no-files-found: ignore
+
   # ── Cross-platform Python runtime smoke (Phase 0 GATE-02) ───────────────
   # Loads the frozen tests/fixtures/omnivoice_data/ fixture and boots the
   # FastAPI app in-process via TestClient on macOS/Windows/Linux. Catches
