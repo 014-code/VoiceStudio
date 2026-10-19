@@ -182,6 +182,9 @@ jobs:
         run: python3 mobile/ios/scripts/fetch-smoke-models.py --accept-test-licences
 
       - name: Real TTS -> ASR
+        env:
+          # Native source metadata uses the same read-only API token as iOS builds.
+          GITHUB_TOKEN: ${{ github.token }}
         run: mobile/ios/scripts/real-inference.sh
 
   android-inference:
