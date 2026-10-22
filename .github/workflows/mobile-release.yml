@@ -3,6 +3,9 @@
 # each store console. The app version is the root package.json version; each
 # run's number is the store build number (VS_BUILD_NUMBER). Secrets live in the
 # protected `mobile-release` environment; see docs/mobile.md → Releasing.
+# A `mobile-v*` tag also collects every binary into a DRAFT GitHub prerelease
+# (signed APK + AAB, signed IPA, unsigned IPA for sideloading) for the owner to
+# review and publish, like the desktop release.
 
 name: mobile-release
 
@@ -196,6 +199,25 @@ jobs:
           path: ${{ runner.temp }}/ipa/*.ipa
           retention-days: 30
 
+      # Unsigned device build for people who sideload with their own Apple ID
+      # (the store IPA above is signed for App Store Connect and will not install
+      # outside TestFlight).
+      - name: Unsigned iPhone build for sideloading
+        run: |
+          xcodebuild -project mobile/ios/VoiceStudio/VoiceStudio.xcodeproj \
+            -scheme VoiceStudio -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/device" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          mkdir -p "$RUNNER_TEMP/unsigned/Payload"
+          cp -R "$RUNNER_TEMP/device/Build/Products/Release-iphoneos/VoiceStudio.app" "$RUNNER_TEMP/unsigned/Payload/"
+          (cd "$RUNNER_TEMP/unsigned" && zip -qry "$RUNNER_TEMP/VoiceStudio-unsigned.ipa" Payload)
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: VoiceStudio-ios-unsigned
+          path: ${{ runner.temp }}/VoiceStudio-unsigned.ipa
+          retention-days: 30
+
       - name: Upload to TestFlight
         if: github.event_name == 'push' || inputs.upload
         env:
@@ -214,3 +236,49 @@ jobs:
           security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true
           rm -f "$RUNNER_TEMP/cert.p12" "$HOME/.appstoreconnect/private_keys/"*.p8
           rm -rf "$HOME/Library/MobileDevice/Provisioning Profiles"
+
+  # Tag builds gather every binary into a draft prerelease; nothing is public until
+  # the owner publishes it. Skipped for manual runs, which only produce artifacts.
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mobile-v')
+    needs: [android, ios]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: assets
+
+      - name: Draft prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          mkdir -p out
+          cp assets/VoiceStudio-android-release/VoiceStudio.apk "out/VoiceStudio-${TAG}.apk"
+          cp assets/VoiceStudio-android-release/VoiceStudio.aab "out/VoiceStudio-${TAG}.aab"
+          cp assets/VoiceStudio-ios-release/*.ipa "out/VoiceStudio-${TAG}-appstore.ipa"
+          cp assets/VoiceStudio-ios-unsigned/VoiceStudio-unsigned.ipa "out/VoiceStudio-${TAG}-unsigned.ipa"
+          (cd out && sha256sum * > SHA256SUMS.txt)
+          cat > notes.md <<NOTES
+          VoiceStudio phone apps ${TAG}. Preview builds; they run models on the phone.
+
+          | File | Use |
+          |---|---|
+          | \`VoiceStudio-${TAG}.apk\` | Android: install directly (allow installs from this source) |
+          | \`VoiceStudio-${TAG}.aab\` | Android App Bundle for Google Play |
+          | \`VoiceStudio-${TAG}-unsigned.ipa\` | iPhone: sideload with your own Apple ID (for example Sideloadly) |
+          | \`VoiceStudio-${TAG}-appstore.ipa\` | App Store Connect build; it only installs through TestFlight |
+
+          Verify downloads against \`SHA256SUMS.txt\`. Details: docs/mobile.md.
+          NOTES
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            test "$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq .isDraft)" = true || { echo "Refusing to replace a published release"; exit 1; }
+            gh release upload "$TAG" out/* --repo "$REPO" --clobber
+          else
+            gh release create "$TAG" out/* --repo "$REPO" --verify-tag --draft --prerelease --title "$TAG — VoiceStudio mobile" --notes-file notes.md
+          fi
