@@ -1,11 +1,9 @@
-# Mobile release — signed Android APK/AAB and iOS IPA, uploaded to the Play
-# internal track and TestFlight. Promotion to production is a manual step in
-# each store console. The app version is the root package.json version; each
-# run's number is the store build number (VS_BUILD_NUMBER). Secrets live in the
-# protected `mobile-release` environment; see docs/mobile.md → Releasing.
-# A `mobile-v*` tag also collects every binary into a DRAFT GitHub prerelease
-# (signed APK + AAB, signed IPA, unsigned IPA for sideloading) for the owner to
-# review and publish, like the desktop release.
+# Mobile release — builds the signed Android APK/AAB and iOS IPA and gathers
+# them, with an unsigned IPA for sideloading, into a DRAFT GitHub prerelease for
+# the owner to review and publish. Store uploads stay in android-play-internal.yml
+# and ios-testflight.yml. The app version is the root package.json version; each
+# run's number is the build number. Secrets live in the protected
+# `mobile-release` environment; see docs/mobile.md → Releasing.
 
 name: mobile-release
 
@@ -20,10 +18,6 @@ on:
         description: Build iOS
         type: boolean
         default: true
-      upload:
-        description: Upload to Play internal and TestFlight (off = signed artifacts only)
-        type: boolean
-        default: false
   push:
     tags: ["mobile-v*"]
 
@@ -33,9 +27,6 @@ permissions:
 concurrency:
   group: mobile-release
   cancel-in-progress: false
-
-env:
-  VS_BUILD_NUMBER: ${{ github.run_number }}
 
 jobs:
   android:
@@ -72,18 +63,22 @@ jobs:
 
       - name: Decode keystore
         env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE: ${{ secrets.ANDROID_UPLOAD_KEYSTORE }}
         run: |
-          test -n "$KEYSTORE_B64" || { echo "::error::ANDROID_KEYSTORE_BASE64 is not set in the mobile-release environment"; exit 1; }
-          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          test -n "$KEYSTORE" || { echo "::error::ANDROID_UPLOAD_KEYSTORE is not set in the mobile-release environment"; exit 1; }
+          umask 077
+          printf '%s' "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/release.keystore"
 
       - name: Build signed APK and AAB
         env:
-          VS_ANDROID_KEYSTORE: ${{ runner.temp }}/release.keystore
-          VS_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          VS_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          VS_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon :app:assembleRelease :app:bundleRelease
+          VOICESTUDIO_ANDROID_KEYSTORE: ${{ runner.temp }}/release.keystore
+          VOICESTUDIO_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          VOICESTUDIO_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          VOICESTUDIO_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          # Unique and increasing per run, including reruns.
+          export VOICESTUDIO_ANDROID_VERSION_CODE=$(( GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT ))
+          ./gradlew --no-daemon :app:assembleRelease :app:bundleRelease
 
       - name: Collect outputs
         run: |
@@ -96,16 +91,6 @@ jobs:
           name: VoiceStudio-android-release
           path: ${{ runner.temp }}/out
           retention-days: 30
-
-      - name: Upload to Play internal track
-        if: github.event_name == 'push' || inputs.upload
-        uses: r0adkll/upload-google-play@935ef9c68bb393a8e6116b1575626a7f5be3a7fb # v1.1.3
-        with:
-          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: com.voicestudio.mobile
-          releaseFiles: ${{ runner.temp }}/out/VoiceStudio.aab
-          track: internal
-          status: completed
 
       - name: Remove keystore
         if: always()
@@ -139,58 +124,53 @@ jobs:
           brew install xcodegen
           xcodegen generate --spec mobile/ios/VoiceStudio/project.yml
 
-      # A temporary keychain holds the distribution certificate; removed at the end.
-      - name: Install certificate and profile
+      - name: Write App Store Connect API key
         env:
-          CERT_B64: ${{ secrets.IOS_CERT_P12_BASE64 }}
-          CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
-          PROFILE_B64: ${{ secrets.IOS_PROFILE_BASE64 }}
+          ASC_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
         run: |
-          test -n "$CERT_B64" && test -n "$PROFILE_B64" || { echo "::error::iOS signing secrets are not set in the mobile-release environment"; exit 1; }
-          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
-          KEYCHAIN_PASSWORD="$(uuidgen)"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          echo "$CERT_B64" | base64 -d > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
-          security list-keychains -d user -s "$KEYCHAIN" login.keychain
-          echo "$PROFILE_B64" | base64 -d > "$RUNNER_TEMP/profile.mobileprovision"
-          security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" > "$RUNNER_TEMP/profile.plist"
-          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$RUNNER_TEMP/profile.plist")
-          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$RUNNER_TEMP/profile.plist")
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          cp "$RUNNER_TEMP/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
-          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          test -n "$ASC_KEY" || { echo "::error::APP_STORE_CONNECT_API_KEY is not set in the mobile-release environment"; exit 1; }
+          umask 077
+          printf '%s\n' "$ASC_KEY" > "$RUNNER_TEMP/asc_api_key.p8"
 
+      # Automatic signing with the API key creates the cloud-managed Apple
+      # Distribution certificate and App Store profile; no .p12 is stored.
       - name: Archive
         env:
-          TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          VOICESTUDIO_IOS_BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
         run: |
-          xcodebuild archive \
-            -project mobile/ios/VoiceStudio/VoiceStudio.xcodeproj \
-            -scheme VoiceStudio -configuration Release -destination 'generic/platform=iOS' \
+          xcodebuild -project mobile/ios/VoiceStudio/VoiceStudio.xcodeproj \
+            -scheme VoiceStudio -configuration Release \
+            -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/VoiceStudio.xcarchive" \
-            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Apple Distribution" \
-            DEVELOPMENT_TEAM="$TEAM_ID" PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME"
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc_api_key.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic \
+            archive
 
       - name: Export IPA
         env:
-          TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>method</key><string>app-store-connect</string>
-            <key>teamID</key><string>$TEAM_ID</string>
-            <key>signingStyle</key><string>manual</string>
-            <key>provisioningProfiles</key><dict><key>com.voicestudio.mobile</key><string>$PROFILE_NAME</string></dict>
-          </dict></plist>
-          PLIST
-          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/VoiceStudio.xcarchive" \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/ipa"
+          /usr/libexec/PlistBuddy -c 'Add :method string app-store-connect' \
+            -c 'Add :destination string export' \
+            -c "Add :teamID string $TEAM_ID" \
+            -c 'Add :signingStyle string automatic' \
+            "$RUNNER_TEMP/ExportOptions.plist"
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/VoiceStudio.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/ipa" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc_api_key.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
           ls "$RUNNER_TEMP/ipa"/*.ipa
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -218,24 +198,9 @@ jobs:
           path: ${{ runner.temp }}/VoiceStudio-unsigned.ipa
           retention-days: 30
 
-      - name: Upload to TestFlight
-        if: github.event_name == 'push' || inputs.upload
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-        run: |
-          mkdir -p "$HOME/.appstoreconnect/private_keys"
-          printf '%s' "$ASC_KEY_P8" > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
-          xcrun altool --upload-app --type ios --file "$RUNNER_TEMP"/ipa/*.ipa \
-            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
-
-      - name: Remove signing material
+      - name: Remove API key
         if: always()
-        run: |
-          security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true
-          rm -f "$RUNNER_TEMP/cert.p12" "$HOME/.appstoreconnect/private_keys/"*.p8
-          rm -rf "$HOME/Library/MobileDevice/Provisioning Profiles"
+        run: rm -f "$RUNNER_TEMP/asc_api_key.p8"
 
   # Tag builds gather every binary into a draft prerelease; nothing is public until
   # the owner publishes it. Skipped for manual runs, which only produce artifacts.
