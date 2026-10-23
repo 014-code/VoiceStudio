@@ -52,10 +52,21 @@ jobs:
           DISPATCH_ACTOR: ${{ github.actor }}
           RERUN_ACTOR: ${{ github.triggering_actor }}
           OWNER: ${{ github.repository_owner }}
+          # Comma-separated logins the owner trusts with unsigned publishes. Only repo
+          # admins can edit Actions variables, so the owner stays in control of it.
+          UNSIGNED_PUBLISHERS: ${{ vars.UNSIGNED_RELEASE_PUBLISHERS }}
         run: |
+          may_publish_unsigned() {
+            [ -n "$1" ] || return 1
+            [ "$1" = "$OWNER" ] && return 0
+            case ",$(printf '%s' "$UNSIGNED_PUBLISHERS" | tr -d '[:space:]')," in
+              *",$1,"*) return 0 ;;
+            esac
+            return 1
+          }
           if [ "$ALLOW_UNSIGNED" = true ]; then
-            test "$DISPATCH_ACTOR" = "$OWNER" && test "$RERUN_ACTOR" = "$OWNER" || {
-              echo "Only the repository owner may accept unsigned installers"; exit 1;
+            may_publish_unsigned "$DISPATCH_ACTOR" && may_publish_unsigned "$RERUN_ACTOR" || {
+              echo "Only the repository owner or an account in UNSIGNED_RELEASE_PUBLISHERS may accept unsigned installers"; exit 1;
             }
           fi
           if [ -n "$RELEASE_TAG_OVERRIDE" ]; then
