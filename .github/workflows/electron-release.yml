@@ -193,6 +193,11 @@ jobs:
           # signer. Omit absent credentials rather than passing empty strings.
           if [ -z "${CSC_LINK:-}" ]; then
             unset CSC_LINK CSC_KEY_PASSWORD
+          elif [ "${{ matrix.platform }}" = darwin ]; then
+            # With discovery off and no identity name, electron-builder never looks in
+            # the keychain it imported CSC_LINK into and skips signing (v0.5.7-beta.1).
+            # Discovery is limited to that imported keychain, not the runner's.
+            export CSC_IDENTITY_AUTO_DISCOVERY=true
           fi
           bun x electron-builder --config electron-builder.config.mjs ${{ matrix.flags }} --publish never
           if [ "$RUNNER_OS" = Linux ]; then
@@ -328,7 +333,13 @@ jobs:
           merge-multiple: true
           path: release-signing
       - name: Describe installer signing per platform
-        run: python3 scripts/release_signing_notes.py release-signing >> release-assets/RELEASE_NOTES.md
+        # The checkout is the release tag, which predates this helper when an older
+        # tag is rebuilt from main; use the helper from the workflow's own commit.
+        run: |
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$GITHUB_REPOSITORY/contents/scripts/release_signing_notes.py?ref=$GITHUB_SHA" \
+            > "$RUNNER_TEMP/release_signing_notes.py"
+          python3 "$RUNNER_TEMP/release_signing_notes.py" release-signing >> release-assets/RELEASE_NOTES.md
       - name: Create or update draft
         run: |
           # A beta is always a prerelease so GitHub never makes it `latest`.
