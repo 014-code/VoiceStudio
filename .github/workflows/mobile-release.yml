@@ -2,7 +2,8 @@
 # them, with an unsigned IPA for sideloading, into a DRAFT GitHub prerelease for
 # the owner to review and publish. Store uploads stay in android-play-internal.yml
 # and ios-testflight.yml. The app version is the root package.json version; each
-# run's number is the build number. Secrets live in the protected
+# signed Android build shares a clock-based code with Play; iOS uses the run number.
+# Secrets live in the protected
 # `mobile-release` environment; see docs/mobile.md → Releasing.
 
 name: mobile-release
@@ -34,6 +35,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: mobile-release
+    concurrency:
+      group: signed-android-builds
+      cancel-in-progress: false
     defaults:
       run:
         working-directory: mobile/android
@@ -76,8 +80,9 @@ jobs:
           VOICESTUDIO_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
           VOICESTUDIO_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: |
-          # Unique and increasing per run, including reruns.
-          export VOICESTUDIO_ANDROID_VERSION_CODE=$(( GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT ))
+          # Shared clock and serialized builds keep codes increasing across both release workflows.
+          export VOICESTUDIO_ANDROID_VERSION_CODE="$(python3 "$GITHUB_WORKSPACE/scripts/android_version_code.py")"
+          test -n "$VOICESTUDIO_ANDROID_VERSION_CODE"
           ./gradlew --no-daemon :app:assembleRelease :app:bundleRelease
 
       - name: Collect outputs
