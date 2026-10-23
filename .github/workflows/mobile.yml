@@ -142,11 +142,12 @@ jobs:
             -resultBundlePath "$RUNNER_TEMP/ui.xcresult" \
             CODE_SIGNING_ALLOWED=NO test-without-building
 
-      - name: Native video export regression
+      - name: Native video export and playback regressions
         run: |
           xcodebuild -project mobile/ios/VoiceStudio/VoiceStudio.xcodeproj \
             -scheme VoiceStudioNative -destination "id=$SIM_UDID" \
             '-only-testing:VoiceStudioKitTests/phoneVideoMuxPreservesOrientationAndMarksPlayableAudio()' \
+            '-only-testing:VoiceStudioKitTests/phoneDubPlaybackRestoresPlaybackAfterDictation()' \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test
       # ScreenshotTour keeps a screenshot of every screen; export them for review.
       - name: Export UI screenshots
