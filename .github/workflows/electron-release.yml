@@ -219,6 +219,52 @@ jobs:
             $signature = Get-AuthenticodeSignature $installer.FullName
             if ($signature.Status -ne 'Valid') { throw "Installer signature is not trusted: $($installer.Name)" }
           }
+      # Measure what each leg actually ships; the release notes are built from these
+      # reports. v0.5.7-beta.1 shipped a macOS bundle whose signing was skipped silently.
+      - name: Report and enforce macOS signing
+        if: matrix.platform == 'darwin'
+        env:
+          HAS_CREDENTIALS: ${{ secrets.ELECTRON_MACOS_CSC_LINK != '' }}
+        run: |
+          APP=$(find electron/release -maxdepth 2 -name VoiceStudio.app -type d -print -quit)
+          test -n "$APP" || { echo "No VoiceStudio.app to verify"; exit 1; }
+          # An invalid bundle signature makes browser downloads open as "damaged".
+          codesign --verify --deep --strict "$APP" || { echo "macOS bundle signature is invalid"; exit 1; }
+          if codesign -dvv "$APP" 2>&1 | grep -q '^Authority=Developer ID Application:' && xcrun stapler validate "$APP"; then
+            STATUS=notarized
+          elif [ "$HAS_CREDENTIALS" = true ]; then
+            echo "Developer ID credentials are configured but the app is not signed and notarized with them"; exit 1
+          else
+            STATUS=adhoc
+          fi
+          mkdir -p electron/release-signing
+          printf '{"platform":"darwin","arch":"%s","status":"%s"}\n' "${{ matrix.arch }}" "$STATUS" > "electron/release-signing/signing-darwin-${{ matrix.arch }}.json"
+      - name: Report and enforce Windows signing
+        if: matrix.platform == 'win32'
+        shell: pwsh
+        env:
+          HAS_CREDENTIALS: ${{ secrets.ELECTRON_WINDOWS_CSC_LINK != '' }}
+        run: |
+          $installers = @(Get-ChildItem electron/release/VoiceStudio-Electron-*.exe)
+          if ($installers.Count -eq 0) { throw "No installer to verify" }
+          $unsigned = @($installers | Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid' })
+          if ($unsigned.Count -eq 0) { $status = 'signed' }
+          elseif ($env:HAS_CREDENTIALS -eq 'true') { throw "Windows signing is configured but these installers are not validly signed: $($unsigned.Name -join ', ')" }
+          else { $status = 'unsigned' }
+          New-Item -ItemType Directory -Force electron/release-signing | Out-Null
+          Set-Content "electron/release-signing/signing-win32-${{ matrix.arch }}.json" ('{"platform":"win32","arch":"${{ matrix.arch }}","status":"' + $status + '"}')
+      - name: Report Linux signing
+        if: matrix.platform == 'linux'
+        run: |
+          mkdir -p electron/release-signing
+          printf '{"platform":"linux","arch":"%s","status":"not-applicable"}\n' "${{ matrix.arch }}" > "electron/release-signing/signing-linux-${{ matrix.arch }}.json"
+      - name: Save the signing report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: electron-signing-${{ matrix.platform }}-${{ matrix.arch }}
+          retention-days: 14
+          if-no-files-found: error
+          path: electron/release-signing/signing-*.json
       - name: Packaged startup smoke test
         working-directory: electron
         run: |
@@ -276,16 +322,13 @@ jobs:
           gh release download "$SUNSET_TAG" --pattern latest.json --dir release-assets
           gh release download "$SUNSET_TAG" --pattern latest-user.json --dir release-assets
           python3 scripts/prepare_electron_release.py --assets release-assets --tag "$TAG" --sunset-tag "$SUNSET_TAG"
-      - name: Disclose explicitly accepted unsigned artifacts
-        if: inputs.allow_unsigned == true
-        run: |
-          cat >> release-assets/RELEASE_NOTES.md <<'EOF'
-
-          ### Electron installer trust
-          These Electron installers are unsigned or ad-hoc signed and are not Apple-notarized.
-          Windows/macOS may show trust warnings. macOS automatic updates are unverified;
-          use manual installer updates. Tauri updater signatures remain independently verified.
-          EOF
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: electron-signing-*
+          merge-multiple: true
+          path: release-signing
+      - name: Describe installer signing per platform
+        run: python3 scripts/release_signing_notes.py release-signing >> release-assets/RELEASE_NOTES.md
       - name: Create or update draft
         run: |
           # A beta is always a prerelease so GitHub never makes it `latest`.
