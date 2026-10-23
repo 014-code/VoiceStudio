@@ -93,6 +93,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Bundle and validate iOS resources
+        run: python3 mobile/ios/scripts/test_resources.py
+
       - name: VoiceStudioKit tests
         working-directory: mobile/ios/VoiceStudioKit
         run: swift test
