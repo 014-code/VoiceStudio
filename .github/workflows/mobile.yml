@@ -10,6 +10,7 @@ on:
   pull_request:
     paths:
       - "mobile/**"
+      - "docs/logo.svg"
       - "electron/src/renderer/src/i18n/locales/**"
       - "electron/src/shared/languages.json"
       - "package.json"
@@ -18,6 +19,7 @@ on:
     branches: [main]
     paths:
       - "mobile/**"
+      - "docs/logo.svg"
       - "electron/src/renderer/src/i18n/locales/**"
       - "electron/src/shared/languages.json"
       - "package.json"
