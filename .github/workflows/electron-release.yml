@@ -310,7 +310,7 @@ jobs:
           path: release-assets
       - name: Validate all platforms before creating a release
         run: |
-          python3 scripts/prepare_electron_release.py --assets release-assets --tag "$TAG"
+          python3 scripts/prepare_electron_release.py --assets release-assets --tag "$TAG" --repo "$GITHUB_REPOSITORY"
       - name: Preserve the final Tauri updater feeds
         # Archived Tauri clients read `latest/download`, which never serves a
         # prerelease, so only Stable releases carry the sunset feeds.
@@ -321,7 +321,7 @@ jobs:
           # so archived Tauri clients never receive Electron installers.
           gh release download "$SUNSET_TAG" --pattern latest.json --dir release-assets
           gh release download "$SUNSET_TAG" --pattern latest-user.json --dir release-assets
-          python3 scripts/prepare_electron_release.py --assets release-assets --tag "$TAG" --sunset-tag "$SUNSET_TAG"
+          python3 scripts/prepare_electron_release.py --assets release-assets --tag "$TAG" --sunset-tag "$SUNSET_TAG" --repo "$GITHUB_REPOSITORY"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: electron-signing-*
