@@ -98,7 +98,7 @@ jobs:
 
   ios:
     if: github.event_name == 'push' || inputs.ios
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 80
     environment: mobile-release
     steps:
