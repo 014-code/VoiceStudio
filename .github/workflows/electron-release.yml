@@ -193,6 +193,11 @@ jobs:
           # signer. Omit absent credentials rather than passing empty strings.
           if [ -z "${CSC_LINK:-}" ]; then
             unset CSC_LINK CSC_KEY_PASSWORD
+          elif [ "${{ matrix.platform }}" = darwin ]; then
+            # With discovery off and no identity name, electron-builder never looks in
+            # the keychain it imported CSC_LINK into and skips signing (v0.5.7-beta.1).
+            # Discovery is limited to that imported keychain, not the runner's.
+            export CSC_IDENTITY_AUTO_DISCOVERY=true
           fi
           bun x electron-builder --config electron-builder.config.mjs ${{ matrix.flags }} --publish never
           if [ "$RUNNER_OS" = Linux ]; then
