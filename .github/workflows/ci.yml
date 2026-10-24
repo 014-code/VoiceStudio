@@ -558,7 +558,9 @@ jobs:
   # on Linux until Phase 1's INST-01 lands setuptools for WhisperX.
   smoke-matrix:
     name: Smoke (${{ matrix.label }})
-    needs: test
+    # After the Python tests (the fast-failing half), not the whole test gate: waiting for
+    # the Electron jobs too left these 1-4 minute jobs idle for ~9 minutes of every run.
+    needs: test-python
     strategy:
       fail-fast: false
       matrix:
