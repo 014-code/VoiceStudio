@@ -3,12 +3,6 @@
 # Both apps build from generated inputs (theme tokens, OpenAPI, Electron locale
 # catalogs), so a change to any of those re-runs this workflow too. Contract
 # drift itself is caught by tests/test_mobile_contract.py in ci.yml.
-#
-# macOS runners are the scarce ones (about 5 at a time for the whole repository),
-# so on a pull request the iOS jobs run only when the change can reach iOS: files
-# under mobile/ios, mobile/contract or mobile/native, or this workflow. Android-only,
-# locale, package.json and logo changes still build Android there. Every push to
-# main and every manual run builds everything, so nothing merges unverified on iOS.
 
 name: mobile
 
@@ -40,42 +34,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  changes:
-    name: Changed paths
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      ios: ${{ steps.detect.outputs.ios }}
-    steps:
-      - id: detect
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT: ${{ github.event_name }}
-          PR: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-        run: |
-          # Any doubt means "true"; only an explicit "nothing here can reach iOS"
-          # (grep exit 1 on a complete file list) produces "false".
-          ios=true
-          if [ "$EVENT" = pull_request ]; then
-            if rows=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[] | [.status, .filename] | @tsv') && [ -n "$rows" ]; then
-              total=$(printf '%s\n' "$rows" | wc -l)
-              status_rc=0
-              printf '%s\n' "$rows" | cut -f1 | sort -u | grep -v -x -E 'added|modified' > /dev/null || status_rc=$?
-              if [ "$total" -lt 3000 ] && [ "$status_rc" -eq 1 ]; then
-                rc=0
-                reach=$(printf '%s\n' "$rows" | cut -f2 | grep -E '^(mobile/(ios|contract|native)/|\.github/workflows/mobile\.yml$)') || rc=$?
-                [ "$rc" -eq 1 ] && ios=false
-              fi
-            fi
-          fi
-          echo "ios=$ios" >> "$GITHUB_OUTPUT"
-          echo "ios jobs: $ios"
-
   android:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -129,8 +87,6 @@ jobs:
           retention-days: 7
 
   ios:
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.ios != 'false' }}
     # Same SDK as the TestFlight upload, so App Store toolchain breaks show up here first.
     runs-on: macos-26
     # Leave room for cold native builds plus simulator and device validation.
@@ -249,8 +205,6 @@ jobs:
   # native code the phones run. Models are user-started downloads in the app;
   # here they are fetched for the test with its explicit test-licence flag.
   ios-inference:
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.ios != 'false' }}
     runs-on: macos-15
     timeout-minutes: 60
     steps:
