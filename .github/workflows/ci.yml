@@ -310,6 +310,7 @@ jobs:
           # Every smoke must be classified (run here, or needs a backend/native app).
           node --test electron/tests/smoke-inventory.test.mjs electron/tests/ui-crawler.test.mjs
           # Runs every offline renderer smoke; it serves /api from a fake backend on $OMNIVOICE_PORT.
+          node electron/tests/run-renderer-smokes.mjs
 
   # The required check. Its name is what branch protection matches, so it stays
   # "Tests (backend + frontend)" even though the work now runs in two jobs.
@@ -331,8 +332,6 @@ jobs:
           # Skipped is only acceptable when change detection said nothing in this
           # PR can affect the Electron jobs.
           [ "$ELECTRON" = success ] || { [ "$ELECTRON" = skipped ] && [ "$ELECTRON_NEEDED" = false ]; }
-
-          node electron/tests/run-renderer-smokes.mjs
 
   # Clicks every button on every route under four backend fault modes and fails
   # on stuck spinners, buttons left disabled, silent failures, crashes and
