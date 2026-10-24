@@ -32,7 +32,8 @@ jobs:
   # else, every push to main and every manual run still runs the full matrix, and
   # if detection fails for any reason everything runs (`!= 'false'` below).
   # Other workflow files are on the allowlist (they cannot change what these jobs
-  # do); ci.yml and electron-*.yml are not.
+  # do); ci.yml and electron-*.yml are not. pyproject.toml is not either: the
+  # packaging contract parses its `readme =` key.
   changes:
     name: Changed paths
     runs-on: ubuntu-24.04
@@ -44,17 +45,38 @@ jobs:
       electron: ${{ steps.detect.outputs.electron }}
     steps:
       - id: detect
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
+          # Any doubt means "true". Only an explicit "nothing outside the allowlist"
+          # from grep (exit 1) produces "false".
           electron=true
           if [ "$EVENT" = pull_request ]; then
-            if files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename') && [ -n "$files" ]; then
-              outside=$(printf '%s\n' "$files" | grep -v -P '^(backend/|omnivoice/|docs/|mobile/|\.github/ISSUE_TEMPLATE/|\.github/scripts/|\.github/[^/]+\.md$|tests/.*\.py$|scripts/[^/]+\.py$|[^/]+\.md$|Makefile$|pyproject\.toml$|uv\.lock$|\.github/workflows/(?!(ci|electron-[a-z-]+)\.yml$)[^/]+\.yml$)' || true)
-              if [ -z "$outside" ]; then electron=false; else printf 'Electron jobs run because of:\n%s\n' "$(printf '%s\n' "$outside" | head -5)"; fi
+            if rows=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[] | [.status, .filename] | @tsv') && [ -n "$rows" ]; then
+              total=$(printf '%s\n' "$rows" | wc -l)
+              if [ "$total" -ge 3000 ]; then
+                echo "3000+ files (the API truncates here): running everything"
+              elif printf '%s\n' "$rows" | cut -f1 | grep -q -x -E 'removed|renamed'; then
+                # Electron checks assert that some root files exist, and a rename out of
+                # electron/ lists only the new path, so deletions and renames run all.
+                echo "a file was deleted or renamed: running everything"
+              else
+                rc=0
+                outside=$(printf '%s\n' "$rows" | cut -f2 | grep -v -P '^(backend/|omnivoice/|docs/|mobile/|\.github/ISSUE_TEMPLATE/|\.github/scripts/|\.github/[^/]+\.md$|tests/.*\.py$|scripts/[^/]+\.py$|[^/]+\.md$|Makefile$|uv\.lock$|\.github/workflows/(?!(ci|electron-[a-z-]+)\.yml$)[^/]+\.yml$)') || rc=$?
+                if [ "$rc" -eq 1 ]; then
+                  electron=false
+                elif [ "$rc" -eq 0 ]; then
+                  echo "Electron jobs run because of (first 5):"
+                  # Indented so a hostile file name can never start a workflow command.
+                  printf '%s\n' "$outside" | head -5 | sed 's/^/    /'
+                else
+                  echo "path matching failed (grep exit $rc): running everything"
+                fi
+              fi
             fi
           fi
           echo "electron=$electron" >> "$GITHUB_OUTPUT"
