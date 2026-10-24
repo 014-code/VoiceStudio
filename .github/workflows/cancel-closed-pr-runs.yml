@@ -38,8 +38,9 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          # Empty on workflow_dispatch, which checks out the dispatched ref.
-          ref: ${{ github.event.pull_request.base.sha }}
+          # The default ref (the base branch tip when the PR closes), not
+          # pull_request.base.sha: that is the base as of the PR's last update and
+          # predates this script for every PR opened before it was merged.
           persist-credentials: false
 
       - name: Cancel the closed pull request's runs
