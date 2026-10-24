@@ -8,6 +8,10 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # The merge queue tests each PR on top of the latest main (and the PRs queued
+  # before it) once, instead of every PR re-running CI each time main moves.
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions:
