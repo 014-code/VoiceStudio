@@ -1,0 +1,36 @@
+name: Gallery pin
+
+# Fails a PR that moves the omnivoice-gallery submodule backwards or onto a
+# commit that is not on the gallery's main — the stale-submodule accident that
+# reverted the pin in #3447 (.github/scripts/gallery_pin.py).
+on:
+  pull_request:
+    paths:
+      - "omnivoice-gallery"
+      - ".gitmodules"
+      - ".github/scripts/gallery_pin.py"
+      - ".github/workflows/gallery-pin.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  pin:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin only moves forward along gallery main
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          old=$(git rev-parse "$BASE:omnivoice-gallery")
+          new=$(git rev-parse "HEAD:omnivoice-gallery")
+          url=$(git config -f .gitmodules submodule.omnivoice-gallery.url)
+          git clone -q --bare --filter=blob:none "$url" gallery.git
+          git -C gallery.git fetch -q origin '+refs/heads/main:refs/remotes/origin/main' 2>/dev/null \
+            || git -C gallery.git update-ref refs/remotes/origin/main refs/heads/main
+          python3 .github/scripts/gallery_pin.py "$old" "$new" gallery.git
