@@ -246,6 +246,9 @@ jobs:
       - name: Mobile theme tokens match Electron
         run: bun --no-install scripts/export-mobile-tokens.ts --check
 
+      - name: Mobile maintainer cards match Electron
+        run: bun --no-install scripts/export-mobile-contributors.ts --check
+
 
   # Electron checks run beside the Python job instead of after it (~16 min serial
   # -> the longer of the two). They need no Python: every backend they touch is a
