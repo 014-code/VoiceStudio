@@ -134,7 +134,10 @@ targets (a failed experimental Windows ARM64 leg does not block the others, and
 its feed is checked only when it was published), validates packaged startup and updater metadata, creates or
 updates a draft, and uploads:
 
-- Electron installers and platform-specific `electron-stable-*.yml` feeds
+- Electron installers named `VoiceStudio-<version>-<os>-<arch>.<ext>` (releases up to
+  v0.5.7-beta.3 used `VoiceStudio-Electron-*`) and platform-specific
+  `electron-stable-*.yml` feeds; feed file names never change, and each feed names
+  its own installer, so older clients update across the rename
 - per-platform `store-artifact-manifest-*.json` provenance records
 - `SHA256SUMS.txt`
 - authored CHANGELOG release notes
@@ -199,11 +202,14 @@ It then asks **draft or publish**, prints the plan
 (including switching to `main` and fast-forwarding it), and only proceeds when you
 type the tag name.
 
-- **Draft:** bumps the three version files in lockstep, runs `uv lock`, writes
-  the `CHANGELOG.md` section from `[Unreleased]` (a stable release renames it; a
-  beta copies it), runs the version guards, commits, pushes `main` and the tag.
-  The tag push builds a draft release; nothing is public.
-- **Publish:** the same, then dispatches `electron-release.yml` with
+- **Two runs, because `main` only changes through pull requests.** The first
+  run bumps the three version files in lockstep, runs `uv lock`, writes the
+  `CHANGELOG.md` section from `[Unreleased]` (a stable release renames it; a
+  beta copies it), runs the version guards, commits on `release/vX.Y.Z[-beta.N]`
+  and opens its pull request. Once that merges, run the helper again with the
+  same version: `main` already has it, so it changes nothing and only tags.
+- **Draft:** the tag push builds a draft release; nothing is public.
+- **Publish:** the tag push, then dispatches `electron-release.yml` with
   `publish=true`. It lists which platforms have signing secrets (macOS needs the
   Developer ID and notarization set, Windows needs `ELECTRON_WINDOWS_CSC_LINK` and
   its password) and, for any platform without them, stops unless you explicitly
@@ -273,7 +279,9 @@ versioned `.AppImage.zsync` asset for AppImageUpdate/AppImageLauncher. Release
 images follow the latest stable GitHub release. The build uses `readelf` and
 `zsyncmake` (Ubuntu package `zsync`) to embed this information before
 regenerating electron-updater's blockmap and checksums; the existing in-app
-updater still uses its separate channel manifest. Verify both update paths
+updater still uses its separate channel manifest. Images up to v0.5.7-beta.3 look
+for `VoiceStudio-Electron-*-linux-x64.AppImage.zsync`, so AppImageUpdate cannot
+move them to a renamed release; they update through the in-app updater. Verify both update paths
 against the final downloaded artifact, not the pre-publish build.
 
 Electron update manifests use platform and architecture channels. Confirm every

@@ -28,14 +28,14 @@ Download a package from the
 
 | Package | File |
 |---|---|
-| AppImage (any distribution) | `VoiceStudio-Electron-<version>-linux-x64.AppImage` |
-| Debian / Ubuntu package | `VoiceStudio-Electron-<version>-linux-x64.deb` |
+| AppImage (any distribution) | `VoiceStudio-<version>-linux-x64.AppImage` |
+| Debian / Ubuntu package | `VoiceStudio-<version>-linux-x64.deb` |
 
 **AppImage:**
 
 ```bash
-chmod +x VoiceStudio-Electron-*-linux-x64.AppImage
-./VoiceStudio-Electron-*-linux-x64.AppImage
+chmod +x VoiceStudio-*-linux-x64.AppImage
+./VoiceStudio-*-linux-x64.AppImage
 ```
 
 The AppImage uses the static AppImage runtime, so it does not need `libfuse2`.
@@ -46,7 +46,7 @@ downloads the latest AppImage, verifies it against the release's
 **.deb:**
 
 ```bash
-sudo apt install ./VoiceStudio-Electron-<version>-linux-x64.deb
+sudo apt install ./VoiceStudio-<version>-linux-x64.deb
 ```
 
 The in-app updater's Linux feed carries the AppImage. Update a `.deb`
@@ -208,7 +208,7 @@ AppImage no longer apply. If the window stays blank or the terminal shows GPU
 process errors, start the app once with Chromium's GPU acceleration disabled:
 
 ```bash
-./VoiceStudio-Electron-*-linux-x64.AppImage --disable-gpu
+./VoiceStudio-*-linux-x64.AppImage --disable-gpu
 ```
 
 On Wayland sessions you can also try forcing X11 (XWayland) with
@@ -267,16 +267,23 @@ on CPU until you opt into the ROCm variant.
 > **Running in Docker or Podman instead?** There's a prebuilt ROCm image —
 > `ghcr.io/debpalash/voicestudio:stable-rocm` — with GPU acceleration out of the
 > box; see [docker.md](docker.md#pull-and-run-amd-gpu--rocm). The rest of this
-> section is about source/desktop installs. (VoiceStudio has no ROCm path on
-Windows; see [windows.md](windows.md#gpu-support) for what a Radeon card can
-do there.)
+> section is about source/desktop installs. Windows has its own opt-in ROCm
+> setup; see [windows-rocm.md](windows-rocm.md).
+
+**Radeon RX 9000 series (RDNA4: RX 9060 / 9070 / 9070 XT, `gfx1200`/`gfx1201`)**
+is supported natively by the ROCm build below (torch 2.8.0 from the `rocm6.4`
+index includes both architectures), so it needs no `HSA_OVERRIDE_GFX_VERSION`.
+The host needs an `amdgpu` kernel driver new enough for RDNA4 (AMD's ROCm
+6.4.1+ driver, or a recent distribution kernel); `rocminfo` listing your card
+as `gfx1200`/`gfx1201` confirms it. Never remap an RDNA4 card onto `11.0.0`:
+RDNA3 kernels cannot run on it.
 
 Ways to opt in, in order of preference:
 
 **1. Packaged app (environment variable).** Install the ROCm userspace
 (`/opt/rocm` or `rocminfo` on PATH), then launch VoiceStudio once with
 `OMNIVOICE_TORCH_VARIANT=rocm` set, for example
-`OMNIVOICE_TORCH_VARIANT=rocm ./VoiceStudio-Electron-*-linux-x64.AppImage`.
+`OMNIVOICE_TORCH_VARIANT=rocm ./VoiceStudio-*-linux-x64.AppImage`.
 Runtime setup then reinstalls `torch`/`torchaudio` from the ROCm wheel index
 (`https://download.pytorch.org/whl/rocm6.4` by default) right after the
 dependency sync, matched to the app's pinned `torch==2.8.0` (the rocm6.2 index
@@ -328,8 +335,12 @@ Notes:
 - ROCm is exercised far less than the default CUDA/MPS/CPU paths — it works,
   but expect rough edges on consumer cards and report what you hit.
 - Unsupported GFX (e.g. some consumer RDNA cards): if it still won't run, set
-  `HSA_OVERRIDE_GFX_VERSION` yourself (e.g. `export HSA_OVERRIDE_GFX_VERSION=11.0.0`)
-  to the nearest supported architecture before launching.
+  `HSA_OVERRIDE_GFX_VERSION` yourself to a supported architecture **of the same
+  generation** before launching (e.g. `export HSA_OVERRIDE_GFX_VERSION=11.0.0`
+  for a gfx11xx card, `10.3.0` for gfx10xx). A remap across generations cannot
+  work, so RDNA4 (gfx12xx) cards need a ROCm build that lists them instead.
+  When the build lacks your card, VoiceStudio's GPU architecture notification
+  names the exact value to try, or says that no remap exists.
 - ZLUDA (CUDA-on-ROCm translation) can work but is unsupported here — prefer a
   native ROCm wheel.
 
