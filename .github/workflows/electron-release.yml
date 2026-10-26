@@ -376,7 +376,18 @@ jobs:
             "repos/$GITHUB_REPOSITORY/contents/scripts/release_signing_notes.py?ref=$GITHUB_SHA" \
             > "$RUNNER_TEMP/release_signing_notes.py"
           # The table leads the notes so downloaders see it before the changelog.
-          { python3 "$RUNNER_TEMP/release_signing_notes.py" release-signing; echo; cat release-assets/RELEASE_NOTES.md; } > "$RUNNER_TEMP/RELEASE_NOTES.md"
+          {
+            python3 "$RUNNER_TEMP/release_signing_notes.py" release-signing
+            echo
+            echo '### Phone downloads'
+            echo
+            BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/VoiceStudio-${TAG#v}"
+            echo "Android: [signed APK](${BASE}-android.apk) · [Play bundle](${BASE}-android.aab)."
+            echo
+            echo "iPhone: [unsigned sideload IPA](${BASE}-ios-unsigned.ipa). Sign with your own Apple ID to install; this is not a TestFlight build."
+            echo
+            cat release-assets/RELEASE_NOTES.md
+          } > "$RUNNER_TEMP/RELEASE_NOTES.md"
           mv "$RUNNER_TEMP/RELEASE_NOTES.md" release-assets/RELEASE_NOTES.md
       - name: Create or update draft
         run: |
