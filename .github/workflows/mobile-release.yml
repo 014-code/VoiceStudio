@@ -9,8 +9,26 @@
 name: mobile-release
 
 on:
+  workflow_call:
+    inputs:
+      release_ref:
+        description: Exact desktop release tag to build
+        type: string
+        required: true
+      signed_ios:
+        description: Also build the App Store Connect IPA
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
+      release_ref:
+        description: Exact release tag to build (empty uses the selected ref)
+        type: string
+        default: ''
+      signed_ios:
+        description: Also build the App Store Connect IPA (requires Apple signing)
+        type: boolean
+        default: true
       android:
         description: Build Android
         type: boolean
@@ -26,12 +44,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: mobile-release
+  group: mobile-release-${{ inputs.release_ref || github.ref }}
   cancel-in-progress: false
 
 jobs:
   android:
-    if: github.event_name == 'push' || inputs.android
+    if: github.event_name == 'push' || inputs.release_ref != '' || inputs.android
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: mobile-release
@@ -44,6 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ inputs.release_ref || github.ref }}
           persist-credentials: false
 
       - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
@@ -95,6 +114,7 @@ jobs:
         with:
           name: VoiceStudio-android-release
           path: ${{ runner.temp }}/out
+          if-no-files-found: error
           retention-days: 30
 
       - name: Remove keystore
@@ -102,13 +122,14 @@ jobs:
         run: rm -f "$RUNNER_TEMP/release.keystore"
 
   ios:
-    if: github.event_name == 'push' || inputs.ios
+    if: github.event_name == 'push' || inputs.release_ref != '' || inputs.ios
     runs-on: macos-26
     timeout-minutes: 80
     environment: mobile-release
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ inputs.release_ref || github.ref }}
           persist-credentials: false
 
       - name: Restore native runtimes
@@ -137,7 +158,28 @@ jobs:
           brew install xcodegen
           xcodegen generate --spec mobile/ios/VoiceStudio/project.yml
 
+      # Unsigned device build for people who sideload with their own Apple ID
+      # (the store IPA above is signed for App Store Connect and will not install
+      # outside TestFlight).
+      - name: Unsigned iPhone build for sideloading
+        run: |
+          xcodebuild -project mobile/ios/VoiceStudio/VoiceStudio.xcodeproj \
+            -scheme VoiceStudio -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/device" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          mkdir -p "$RUNNER_TEMP/unsigned/Payload"
+          cp -R "$RUNNER_TEMP/device/Build/Products/Release-iphoneos/VoiceStudio.app" "$RUNNER_TEMP/unsigned/Payload/"
+          (cd "$RUNNER_TEMP/unsigned" && zip -qry "$RUNNER_TEMP/VoiceStudio-unsigned.ipa" Payload)
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: VoiceStudio-ios-unsigned
+          path: ${{ runner.temp }}/VoiceStudio-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Write App Store Connect API key
+        if: github.event_name == 'push' || inputs.signed_ios
         env:
           ASC_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
         run: |
@@ -148,6 +190,7 @@ jobs:
       # Automatic signing with the API key creates the cloud-managed Apple
       # Distribution certificate and App Store profile; no .p12 is stored.
       - name: Archive
+        if: github.event_name == 'push' || inputs.signed_ios
         env:
           ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
@@ -166,6 +209,7 @@ jobs:
             archive
 
       - name: Export IPA
+        if: github.event_name == 'push' || inputs.signed_ios
         env:
           ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
@@ -187,28 +231,11 @@ jobs:
           ls "$RUNNER_TEMP/ipa"/*.ipa
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: github.event_name == 'push' || inputs.signed_ios
         with:
           name: VoiceStudio-ios-release
           path: ${{ runner.temp }}/ipa/*.ipa
-          retention-days: 30
-
-      # Unsigned device build for people who sideload with their own Apple ID
-      # (the store IPA above is signed for App Store Connect and will not install
-      # outside TestFlight).
-      - name: Unsigned iPhone build for sideloading
-        run: |
-          xcodebuild -project mobile/ios/VoiceStudio/VoiceStudio.xcodeproj \
-            -scheme VoiceStudio -configuration Release -sdk iphoneos \
-            -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/device" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
-          mkdir -p "$RUNNER_TEMP/unsigned/Payload"
-          cp -R "$RUNNER_TEMP/device/Build/Products/Release-iphoneos/VoiceStudio.app" "$RUNNER_TEMP/unsigned/Payload/"
-          (cd "$RUNNER_TEMP/unsigned" && zip -qry "$RUNNER_TEMP/VoiceStudio-unsigned.ipa" Payload)
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: VoiceStudio-ios-unsigned
-          path: ${{ runner.temp }}/VoiceStudio-unsigned.ipa
+          if-no-files-found: error
           retention-days: 30
 
       - name: Remove API key
